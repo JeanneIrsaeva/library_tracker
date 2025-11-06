@@ -1,0 +1,26 @@
+uvicorn app.main:app --reload
+
+venv\Scripts\activate
+deactivate
+
+alembic init alembic
+
+alembic revision --autogenerate -m "Описание изменений"
+alembic upgrade head
+alembic downgrade -1
+
+
+# режим
+python cli.py manage
+
+# Просмотр всех книг
+python cli.py list-all
+
+# Просмотр 
+python cli.py list-user-books --user-id 1
+
+# Создание
+python cli.py create --title "1984" --author "Джордж Оруэлл" --genre "Антиутопия" --user-id 1
+
+# Удаление
+python cli.py delete --book-id 1 --user-id 1
