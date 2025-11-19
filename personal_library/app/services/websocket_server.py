@@ -5,38 +5,29 @@ from typing import Set, Dict
 from app.utils.jwt import verify_token
 
 class ChatServer:
-    """
-    Класс чата, реализующий всю логику работы с WebSocket соединениями
-    Соответствует требованиям методички 2.5
-    """
     
     def __init__(self):
-        # Хранилище подключенных клиентов
         self.connected_clients: Set[websockets.WebSocketServerProtocol] = set()
-        # Связь пользователей с их соединениями
+       
         self.user_connections: Dict[int, websockets.WebSocketServerProtocol] = {}
-        # Администраторы онлайн
+        
         self.admin_connections: Set[websockets.WebSocketServerProtocol] = set()
         
         print("✅ ChatServer инициализирован")
 
     async def on_open(self, websocket: websockets.WebSocketServerProtocol):
-        """Функция обработки подключения нового клиента"""
         self.connected_clients.add(websocket)
         print(f"🔗 Новое подключение. Всего клиентов: {len(self.connected_clients)}")
         
-        # Отправляем приветственное сообщение
         await websocket.send(json.dumps({
             'type': 'connection_established',
             'message': 'WebSocket соединение установлено. Пройдите аутентификацию.'
         }))
 
     async def on_close(self, websocket: websockets.WebSocketServerProtocol):
-        """Функция обработки закрытия соединения с клиентом"""
         if websocket in self.connected_clients:
             self.connected_clients.remove(websocket)
         
-        # Удаляем из user_connections
         user_id = None
         for uid, ws in list(self.user_connections.items()):
             if ws == websocket:
@@ -46,7 +37,6 @@ class ChatServer:
             del self.user_connections[user_id]
             print(f"👋 Пользователь {user_id} отключился")
         
-        # Удаляем из admin_connections
         if websocket in self.admin_connections:
             self.admin_connections.remove(websocket)
             print(f"👋 Администратор отключился")
@@ -54,12 +44,10 @@ class ChatServer:
         print(f"🔌 Соединение закрыто. Осталось клиентов: {len(self.connected_clients)}")
 
     async def on_error(self, websocket: websockets.WebSocketServerProtocol, error: Exception):
-        """Функция обработки ошибочного закрытия соединения"""
         print(f"❌ WebSocket ошибка: {error}")
         await self.on_close(websocket)
 
     async def on_message(self, websocket: websockets.WebSocketServerProtocol, message: str):
-        """Основная функция обработки входящих сообщений"""
         try:
             data = json.loads(message)
             message_type = data.get('type')
@@ -88,7 +76,6 @@ class ChatServer:
             await self.on_error(websocket, e)
 
     async def handle_auth(self, websocket: websockets.WebSocketServerProtocol, data: dict):
-        """Обработка аутентификации"""
         token = data.get('token')
         user_data = verify_token(token)
         
@@ -119,11 +106,9 @@ class ChatServer:
             }))
             print(f"👤 Пользователь {user_id} подключился к чату")
             
-            # Уведомляем всех администраторов о новом пользователе
             await self.notify_admins_about_new_user(user_id)
 
     async def handle_user_message(self, websocket: websockets.WebSocketServerProtocol, data: dict):
-        """Обработка сообщений от пользователей"""
         token = data.get('token')
         user_data = verify_token(token)
         
@@ -144,7 +129,6 @@ class ChatServer:
             }))
             return
         
-        # Сохраняем сообщение в базу данных
         from app.database import SessionLocal
         from app.models.chat import ChatMessage
         
@@ -153,13 +137,12 @@ class ChatServer:
             db_message = ChatMessage(
                 user_id=user_id,
                 message=message_text,
-                is_admin=0  # Сообщение от пользователя
+                is_admin=0  
             )
             db.add(db_message)
             db.commit()
             db.refresh(db_message)
             
-            # Отправляем сообщение всем администраторам
             await self.broadcast_to_admins({
                 'type': 'user_message',
                 'user_id': user_id,
@@ -168,7 +151,6 @@ class ChatServer:
                 'message_id': db_message.id
             })
             
-            # Подтверждение пользователю
             await websocket.send(json.dumps({
                 'type': 'message_sent',
                 'message_id': db_message.id,
@@ -184,7 +166,6 @@ class ChatServer:
             db.close()
 
     async def handle_admin_message(self, websocket: websockets.WebSocketServerProtocol, data: dict):
-        """Обработка сообщений от администраторов"""
         token = data.get('token')
         user_data = verify_token(token)
         
@@ -205,22 +186,20 @@ class ChatServer:
             }))
             return
         
-        # Сохраняем сообщение в базу данных
         from app.database import SessionLocal
         from app.models.chat import ChatMessage
         
         db = SessionLocal()
         try:
             db_message = ChatMessage(
-                user_id=target_user_id,  # Сохраняем от имени пользователя, но помечаем как админское
+                user_id=target_user_id,  
                 message=message_text,
-                is_admin=1  # Сообщение от администратора
+                is_admin=1  
             )
             db.add(db_message)
             db.commit()
             db.refresh(db_message)
             
-            # Отправляем сообщение конкретному пользователю
             if target_user_id in self.user_connections:
                 await self.user_connections[target_user_id].send(json.dumps({
                     'type': 'admin_message',
@@ -229,7 +208,6 @@ class ChatServer:
                     'message_id': db_message.id
                 }))
             
-            # Подтверждение администратору
             await websocket.send(json.dumps({
                 'type': 'message_sent',
                 'message_id': db_message.id,
@@ -245,7 +223,6 @@ class ChatServer:
             db.close()
 
     async def handle_get_history(self, websocket: websockets.WebSocketServerProtocol, data: dict):
-        """Обработка запроса истории сообщений"""
         token = data.get('token')
         user_data = verify_token(token)
         
@@ -265,10 +242,8 @@ class ChatServer:
             role = user_data.get('role')
             
             if role == 'admin':
-                # Админы видят все сообщения
                 messages = db.query(ChatMessage).order_by(ChatMessage.created_at).limit(50).all()
             else:
-                # Пользователи видят только свои сообщения
                 messages = db.query(ChatMessage).filter(
                     ChatMessage.user_id == user_id
                 ).order_by(ChatMessage.created_at).limit(50).all()
@@ -296,7 +271,6 @@ class ChatServer:
             db.close()
 
     async def broadcast_to_admins(self, message: dict):
-        """Рассылка сообщения всем администраторам"""
         message_json = json.dumps(message)
         for admin_ws in self.admin_connections:
             try:
@@ -305,7 +279,6 @@ class ChatServer:
                 print(f"❌ Ошибка отправки админу: {e}")
 
     async def notify_admins_about_new_user(self, user_id: int):
-        """Уведомление администраторов о новом подключенном пользователе"""
         await self.broadcast_to_admins({
             'type': 'user_connected',
             'user_id': user_id,
@@ -313,7 +286,6 @@ class ChatServer:
         })
 
     async def handler(self, websocket: websockets.WebSocketServerProtocol):
-        """Основной обработчик WebSocket соединений (новая сигнатура)"""
         await self.on_open(websocket)
         try:
             async for message in websocket:
@@ -326,10 +298,8 @@ class ChatServer:
         finally:
             await self.on_close(websocket)
 
-# Глобальный экземпляр чат-сервера
 chat_server = ChatServer()
 
-# Функция-обработчик для WebSocket сервера (исправленная сигнатура)
 async def websocket_handler(websocket: websockets.WebSocketServerProtocol):
     """
     Обработчик WebSocket соединений

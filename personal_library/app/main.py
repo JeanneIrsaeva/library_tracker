@@ -10,9 +10,7 @@ from app.controllers.book_controller import router as book_router
 from app.controllers.auth_controller import router as auth_router
 from app.controllers.chat_controller import router as chat_router
 from app.database import create_tables
-from app.services.websocket_server import websocket_handler  # Импортируем новый обработчик
-
-# Импорты моделей для Alembic
+from app.services.websocket_server import websocket_handler  
 from app.models import book, user, chat
 
 logging.basicConfig(
@@ -69,13 +67,10 @@ def custom_openapi():
 app.openapi = custom_openapi
 
 async def run_websocket_server():
-    """Запуск WebSocket сервера"""
     try:
-        # Пробуем разные порты если 8080 занят
         ports = [8080, 8081, 8082, 8083]
         for port in ports:
             try:
-                # Используем новую сигнатуру без path
                 server = await websockets.serve(
                     websocket_handler, 
                     "localhost", 
@@ -86,7 +81,6 @@ async def run_websocket_server():
                 print(f"🎯 Назначение: Чат технической поддержки")
                 print(f"👥 Участники: Пользователи ↔ Администраторы")
                 
-                # Бесконечный цикл ожидания
                 await asyncio.Future()
                 return
                 
@@ -103,9 +97,7 @@ async def run_websocket_server():
         print(f"❌ Не удалось запустить WebSocket сервер: {e}")
 
 def start_websocket_server():
-    """Запуск WebSocket сервера в отдельном потоке"""
     try:
-        # Создаем новую event loop для этого потока
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(run_websocket_server())
@@ -114,16 +106,13 @@ def start_websocket_server():
 
 @app.on_event("startup")
 def on_startup():
-    """Запуск приложения"""
     create_tables()
     print("✅ База данных инициализирована")
     
-    # Запускаем WebSocket сервер в отдельном потоке
     websocket_thread = threading.Thread(target=start_websocket_server, daemon=True)
     websocket_thread.start()
     print("🔄 Запуск WebSocket сервера в фоновом режиме...")
 
-# Подключаем роутеры
 app.include_router(book_router)
 app.include_router(auth_router)
 app.include_router(chat_router)

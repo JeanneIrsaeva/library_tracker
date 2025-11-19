@@ -7,7 +7,7 @@ import logging
 from app.database import get_db
 from app.schemas.book import BookCreate, BookUpdate, BookResponse
 from app.services.book_service import BookService
-from app.dependencies import get_current_user  # Импортируем новую зависимость
+from app.dependencies import get_current_user  
 
 router = APIRouter(prefix="/books", tags=["books"])
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 @router.get("/", response_model=List[BookResponse])
 def get_books(
     db: Session = Depends(get_db),
-    user_data: dict = Depends(get_current_user)  # Используем новую зависимость
+    user_data: dict = Depends(get_current_user)  
 ):
     try:
         service = BookService(db)
@@ -33,7 +33,7 @@ def get_books(
 def get_book(
     book_id: int, 
     db: Session = Depends(get_db),
-    user_data: dict = Depends(get_current_user)  # Используем новую зависимость
+    user_data: dict = Depends(get_current_user)  
 ):
     service = BookService(db)
     book = service.get_book_by_id(book_id)
@@ -44,7 +44,7 @@ def get_book(
             detail="Книга не найдена"
         )
     
-    # Проверяем, что книга принадлежит текущему пользователю
+    
     if book.user_id != user_data.get('user_id'):
         raise HTTPException(
             status_code=http_status.HTTP_403_FORBIDDEN,
@@ -65,7 +65,7 @@ def create_book(
     end_date: Optional[date] = Form(None),
     book_status: str = Form("PLANNED"),
     db: Session = Depends(get_db),
-    user_data: dict = Depends(get_current_user)  # Используем новую зависимость
+    user_data: dict = Depends(get_current_user) 
 ):
     try:
         valid_statuses = {"READING", "PLANNED", "READ"}
@@ -114,7 +114,7 @@ def update_book(
     book_id: int, 
     book_update: BookUpdate, 
     db: Session = Depends(get_db),
-    user_data: dict = Depends(get_current_user)  # Используем новую зависимость
+    user_data: dict = Depends(get_current_user)  
 ):
     service = BookService(db)
     book = service.update_book(book_id, book_update, user_data.get('user_id'))
@@ -132,7 +132,7 @@ def update_book_full(
     book_id: int, 
     book_update: BookUpdate, 
     db: Session = Depends(get_db),
-    user_data: dict = Depends(get_current_user)  # Используем новую зависимость
+    user_data: dict = Depends(get_current_user)  
 ):
     service = BookService(db)
     book = service.update_book(book_id, book_update, user_data.get('user_id'))
@@ -149,7 +149,7 @@ def update_book_full(
 def delete_book(
     book_id: int, 
     db: Session = Depends(get_db),
-    user_data: dict = Depends(get_current_user)  # Используем новую зависимость
+    user_data: dict = Depends(get_current_user)  
 ):
     service = BookService(db)
     if not service.delete_book(book_id, user_data.get('user_id')):

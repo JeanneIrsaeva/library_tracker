@@ -3,7 +3,6 @@ from sqlalchemy.sql import func
 from passlib.context import CryptContext
 from app.database import Base
 
-# Используем более современный алгоритм хеширования
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 class User(Base):
@@ -21,7 +20,6 @@ class User(Base):
     
     @staticmethod
     def get_password_hash(password):
-        # Ограничиваем длину пароля для bcrypt
         if len(password) > 72:
             password = password[:72]
         return pwd_context.hash(password)

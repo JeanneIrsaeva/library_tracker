@@ -4,7 +4,6 @@ from sqlalchemy.ext.declarative import declarative_base
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./library.db"
 
-# Единый Base для всех моделей
 Base = declarative_base()
 
 engine = create_engine(

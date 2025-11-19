@@ -46,7 +46,7 @@ const BookForm = ({ book, onSubmit, onCancel }) => {
       rating: formData.rating ? parseInt(formData.rating) : null,
       start_date: formData.start_date || null,
       end_date: formData.end_date || null,
-      book_status: formData.status  // Используем переименованное поле для бэкенда
+      book_status: formData.status  
     };
 
     onSubmit(submitData);

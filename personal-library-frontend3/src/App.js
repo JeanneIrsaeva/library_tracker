@@ -48,6 +48,65 @@ const MOCK_BOOKS = [
   }
 ];
 
+const refreshAuthToken = async () => {
+  const refreshToken = localStorage.getItem('refresh_token');
+  if (!refreshToken) {
+    throw new Error('No refresh token available');
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('refresh_token', data.refresh_token);
+      return data.access_token;
+    } else {
+      throw new Error('Token refresh failed');
+    }
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    throw error;
+  }
+};
+
+const authFetch = async (url, options = {}) => {
+  let token = localStorage.getItem('token');
+  
+  const config = {
+    ...options,
+    headers: {
+      ...options.headers,
+      'Authorization': `Bearer ${token}`
+    }
+  };
+
+  let response = await fetch(url, config);
+
+  if (response.status === 401) {
+    try {
+      const newToken = await refreshAuthToken();
+      config.headers['Authorization'] = `Bearer ${newToken}`;
+      response = await fetch(url, config);
+    } catch (error) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+      throw new Error('Authentication failed');
+    }
+  }
+
+  return response;
+};
+
 function App() {
   const [books, setBooks] = useState([]);
   const [selectedBook, setSelectedBook] = useState(null);
@@ -59,13 +118,13 @@ function App() {
 
   const handleLogout = useCallback(() => {
     localStorage.removeItem('token');
+    localStorage.removeItem('refresh_token');
     localStorage.removeItem('user');
     setIsAuthenticated(false);
     setUser(null);
     setBooks([]);
   }, []);
 
-  // Используем useCallback для стабильной ссылки на функцию
   const fetchBooks = useCallback(async (token = null) => {
     const authToken = token || localStorage.getItem('token');
     
@@ -77,18 +136,12 @@ function App() {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/books/`, {
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
-      });
+      const response = await authFetch(`${API_BASE_URL}/books/`);
       
       if (response.ok) {
         const data = await response.json();
         setBooks(data);
         setUseMockData(false);
-      } else if (response.status === 401) {
-        handleLogout();
       } else {
         console.warn('Бэкенд недоступен, используем моковые данные');
         setBooks(MOCK_BOOKS);
@@ -99,9 +152,8 @@ function App() {
       setBooks(MOCK_BOOKS);
       setUseMockData(true);
     }
-  }, [useMockData, handleLogout]);
+  }, [useMockData]);
 
-  // Проверка авторизации при загрузке
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userData = localStorage.getItem('user');
@@ -126,7 +178,6 @@ function App() {
     }
 
     try {
-      const token = localStorage.getItem('token');
       const formData = new FormData();
       Object.keys(bookData).forEach(key => {
         if (bookData[key] !== null && bookData[key] !== undefined) {
@@ -134,11 +185,8 @@ function App() {
         }
       });
 
-      const response = await fetch(`${API_BASE_URL}/books/`, {
+      const response = await authFetch(`${API_BASE_URL}/books/`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
         body: formData,
       });
 
@@ -171,12 +219,10 @@ function App() {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/books/${bookId}`, {
+      const response = await authFetch(`${API_BASE_URL}/books/${bookId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(bookData),
       });
@@ -206,12 +252,8 @@ function App() {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/books/${bookId}`, {
+      const response = await authFetch(`${API_BASE_URL}/books/${bookId}`, {
         method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
       });
 
       if (response.ok) {
@@ -267,6 +309,7 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         localStorage.setItem('token', data.access_token);
+        localStorage.setItem('refresh_token', data.refresh_token);
         localStorage.setItem('user', JSON.stringify(data.user));
         setIsAuthenticated(true);
         setUser(data.user);
@@ -293,6 +336,7 @@ function App() {
       if (response.ok) {
         const data = await response.json();
         localStorage.setItem('token', data.access_token);
+        localStorage.setItem('refresh_token', data.refresh_token);
         localStorage.setItem('user', JSON.stringify(data.user));
         setIsAuthenticated(true);
         setUser(data.user);
@@ -307,32 +351,29 @@ function App() {
     }
   };
 
-  // Если пользователь не авторизован, показываем форму входа
-  // Если пользователь не авторизован, показываем форму входа
-if (!isAuthenticated) {
-  return (
-    <Router>
-      <div className="app">
-        <header className="app-header">
-          <h1>Личная библиотека</h1>
-        </header>
-        <div className="app-content">
-          <Routes>
-            <Route path="/login" element={
-              <AuthForm onLogin={handleLogin} isLogin={true} />
-            } />
-            <Route path="/register" element={
-              <AuthForm onRegister={handleRegister} isLogin={false} />
-            } />
-            <Route path="*" element={<Navigate to="/login" />} />
-          </Routes>
+  if (!isAuthenticated) {
+    return (
+      <Router>
+        <div className="app">
+          <header className="app-header">
+            <h1>Личная библиотека</h1>
+          </header>
+          <div className="app-content">
+            <Routes>
+              <Route path="/login" element={
+                <AuthForm onLogin={handleLogin} isLogin={true} />
+              } />
+              <Route path="/register" element={
+                <AuthForm onRegister={handleRegister} isLogin={false} />
+              } />
+              <Route path="*" element={<Navigate to="/login" />} />
+            </Routes>
+          </div>
         </div>
-      </div>
-    </Router>
-  );
-}
+      </Router>
+    );
+  }
 
-  // Если пользователь авторизован, показываем основное приложение
   return (
     <Router>
       <div className="app">

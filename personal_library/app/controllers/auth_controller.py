@@ -2,15 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.user import User
-from app.schemas.user import UserCreate, UserLogin, Token, UserResponse
-from app.utils.jwt import create_access_token
+from app.schemas.user import UserCreate, UserLogin, Token, UserResponse, RefreshTokenRequest
+from app.utils.jwt import create_access_token, create_refresh_token, refresh_tokens
 from datetime import timedelta
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=Token)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    # Проверяем, существует ли пользователь
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         raise HTTPException(
@@ -18,22 +17,21 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
             detail="Пользователь с таким email уже существует"
         )
     
-    # Создаем пользователя
     hashed_password = User.get_password_hash(user_data.password)
     db_user = User(email=user_data.email, hashed_password=hashed_password)
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     
-    # Создаем токен
-    access_token = create_access_token(
-        data={"user_id": db_user.id, "email": db_user.email, "role": db_user.role}
-    )
+    token_data = {"user_id": db_user.id, "email": db_user.email, "role": db_user.role}
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
     
     return Token(
-    access_token=access_token,
-    token_type="bearer",
-    user=UserResponse.model_validate(db_user)
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user=UserResponse.model_validate(db_user)
     )
 
 @router.post("/login", response_model=Token)
@@ -45,12 +43,44 @@ def login(user_data: UserLogin, db: Session = Depends(get_db)):
             detail="Неверный email или пароль"
         )
     
-    access_token = create_access_token(
-        data={"user_id": user.id, "email": user.email, "role": user.role}
-    )
+    token_data = {"user_id": user.id, "email": user.email, "role": user.role}
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
     
     return Token(
-    access_token=access_token,
-    token_type="bearer",
-    user=UserResponse.model_validate(user)
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+        user=UserResponse.model_validate(user)
+    )
+
+@router.post("/refresh", response_model=Token)
+def refresh_token(request: RefreshTokenRequest, db: Session = Depends(get_db)):
+    tokens = refresh_tokens(request.refresh_token)
+    if not tokens:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный refresh token"
+        )
+    
+    from app.utils.jwt import verify_token
+    payload = verify_token(request.refresh_token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный refresh token"
+        )
+    
+    user = db.query(User).filter(User.id == payload.get("user_id")).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Пользователь не найден"
+        )
+    
+    return Token(
+        access_token=tokens["access_token"],
+        refresh_token=tokens["refresh_token"],
+        token_type="bearer",
+        user=UserResponse.model_validate(user)
     )

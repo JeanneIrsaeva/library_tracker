@@ -1,6 +1,67 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './Chat.css';
 
+const API_BASE_URL = 'http://localhost:8000';
+
+const refreshAuthToken = async () => {
+  const refreshToken = localStorage.getItem('refresh_token');
+  if (!refreshToken) {
+    throw new Error('No refresh token available');
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('refresh_token', data.refresh_token);
+      return data.access_token;
+    } else {
+      throw new Error('Token refresh failed');
+    }
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    throw error;
+  }
+};
+
+const authFetch = async (url, options = {}) => {
+  let token = localStorage.getItem('token');
+  
+  const config = {
+    ...options,
+    headers: {
+      ...options.headers,
+      'Authorization': `Bearer ${token}`
+    }
+  };
+
+  let response = await fetch(url, config);
+
+  if (response.status === 401) {
+    try {
+      const newToken = await refreshAuthToken();
+      config.headers['Authorization'] = `Bearer ${newToken}`;
+      response = await fetch(url, config);
+    } catch (error) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('refresh_token');
+      localStorage.removeItem('user');
+      window.location.href = '/login';
+      throw new Error('Authentication failed');
+    }
+  }
+
+  return response;
+};
+
 const Chat = () => {
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -9,7 +70,13 @@ const Chat = () => {
   const [isTyping, setIsTyping] = useState(false);
   const messagesEndRef = useRef(null);
 
-  // Получаем данные текущего пользователя из токена
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user');
+    window.location.href = '/login';
+  };
+
   const getCurrentUser = () => {
     const token = localStorage.getItem('token');
     if (!token) return null;
@@ -29,12 +96,56 @@ const Chat = () => {
 
   const currentUser = getCurrentUser();
 
+  const fetchChatHistory = async () => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/chat/messages?limit=50`);
+      if (response.ok) {
+        const data = await response.json();
+        const formattedMessages = data.map(msg => ({
+          ...msg,
+          email: msg.is_admin ? 'Администратор' : (msg.email || `Пользователь ${msg.user_id}`)
+        }));
+        setMessages(formattedMessages);
+      } else {
+        console.error('Ошибка при загрузке истории сообщений:', response.status);
+      }
+    } catch (error) {
+      console.error('Ошибка при загрузке истории сообщений:', error);
+    }
+  };
+
+  const sendMessageViaAPI = async (messageText) => {
+    try {
+      const response = await authFetch(`${API_BASE_URL}/chat/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: messageText }),
+      });
+
+      if (response.ok) {
+        const newMessage = await response.json();
+        return newMessage;
+      } else {
+        console.error('Ошибка при отправке сообщения:', response.status);
+        return null;
+      }
+    } catch (error) {
+      console.error('Ошибка при отправке сообщения:', error);
+      return null;
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) {
       alert('Требуется авторизация для использования чата');
+      handleLogout();
       return;
     }
+
+    fetchChatHistory();
 
     const ws = new WebSocket('ws://localhost:8080');
 
@@ -42,13 +153,11 @@ const Chat = () => {
       console.log('WebSocket соединение установлено');
       setIsConnected(true);
       
-      // Аутентификация при подключении
       ws.send(JSON.stringify({
         type: 'auth',
         token: token
       }));
 
-      // Запрос истории сообщений
       setTimeout(() => {
         ws.send(JSON.stringify({
           type: 'get_history',
@@ -73,12 +182,11 @@ const Chat = () => {
         console.log('Получено сообщение:', data);
 
         if (data.type === 'user_message') {
-          // Сообщение от другого пользователя (для админа)
           const newMessage = {
             id: data.message_id || Date.now(),
             user_id: data.user_id,
             message: data.message,
-            is_admin: 0, // Сообщение от пользователя
+            is_admin: 0, 
             created_at: data.timestamp || new Date().toISOString(),
             email: data.email || `Пользователь ${data.user_id}`
           };
@@ -86,12 +194,11 @@ const Chat = () => {
           setMessages(prev => [...prev, newMessage]);
           
         } else if (data.type === 'admin_message') {
-          // Сообщение от администратора (для пользователя)
           const newMessage = {
             id: data.message_id || Date.now(),
             user_id: data.user_id,
             message: data.message,
-            is_admin: 1, // Сообщение от администратора
+            is_admin: 1,
             created_at: data.timestamp || new Date().toISOString(),
             email: 'Администратор'
           };
@@ -99,7 +206,7 @@ const Chat = () => {
           setMessages(prev => [...prev, newMessage]);
           
         } else if (data.type === 'chat_history') {
-          // Загружаем историю и правильно определяем принадлежность сообщений
+          
           const formattedMessages = (data.messages || []).map(msg => ({
             ...msg,
             email: msg.is_admin ? 'Администратор' : (msg.email || `Пользователь ${msg.user_id}`)
@@ -116,6 +223,9 @@ const Chat = () => {
           setIsTyping(true);
         } else if (data.type === 'typing_stop') {
           setIsTyping(false);
+        } else if (data.type === 'auth_error') {
+          console.error('Ошибка аутентификации в WebSocket:', data.message);
+          handleLogout();
         }
       } catch (error) {
         console.error('Ошибка обработки сообщения:', error);
@@ -138,22 +248,29 @@ const Chat = () => {
     });
   }, [messages, isTyping]);
 
-  const sendMessage = () => {
+  const sendMessage = async () => {
     if (!newMessage.trim() || !socket || !isConnected) return;
 
     const token = localStorage.getItem('token');
     
-    // Определяем тип сообщения в зависимости от роли пользователя
+    
     const messageType = currentUser?.role === 'admin' ? 'admin_message' : 'message';
     
     socket.send(JSON.stringify({
       type: messageType,
       token: token,
       message: newMessage.trim(),
-      ...(currentUser?.role === 'admin' && { target_user_id: getTargetUserId() }) // Для админа указываем получателя
+      ...(currentUser?.role === 'admin' && { target_user_id: getTargetUserId() }) 
     }));
 
-    // Если это пользователь (не админ), сразу добавляем свое сообщение в список
+    if (currentUser?.role !== 'admin') {
+      try {
+        await sendMessageViaAPI(newMessage.trim());
+      } catch (error) {
+        console.error('Ошибка при сохранении сообщения через API:', error);
+      }
+    }
+
     if (currentUser?.role !== 'admin') {
       const myMessage = {
         id: Date.now(),
@@ -169,11 +286,9 @@ const Chat = () => {
     setNewMessage('');
   };
 
-  // Для админа: определяем ID пользователя, которому отвечаем (последний отправитель)
   const getTargetUserId = () => {
     if (messages.length === 0) return null;
     
-    // Находим последнее сообщение от пользователя (не админа)
     const lastUserMessage = [...messages].reverse().find(msg => !msg.is_admin);
     return lastUserMessage ? lastUserMessage.user_id : null;
   };
@@ -188,7 +303,6 @@ const Chat = () => {
   const handleInputChange = (e) => {
     setNewMessage(e.target.value);
     
-    // Отправляем индикатор набора текста
     if (socket && isConnected) {
       const token = localStorage.getItem('token');
       socket.send(JSON.stringify({
@@ -196,7 +310,6 @@ const Chat = () => {
         token: token
       }));
       
-      // Останавливаем индикатор через 1 секунду
       setTimeout(() => {
         if (socket && isConnected) {
           socket.send(JSON.stringify({
@@ -207,19 +320,14 @@ const Chat = () => {
       }, 1000);
     }
   };
-
-  // Определяем, является ли сообщение "моим"
   const isMyMessage = (message) => {
     if (currentUser?.role === 'admin') {
-      // Для админа: его сообщения - это те, где is_admin = 1
       return message.is_admin === 1;
     } else {
-      // Для пользователя: его сообщения - это те, где user_id совпадает и is_admin = 0
       return message.user_id === currentUser?.id && message.is_admin === 0;
     }
   };
 
-  // Группировка сообщений по датам
   const groupMessagesByDate = (messages) => {
     const groups = {};
     messages.forEach(message => {
@@ -234,7 +342,6 @@ const Chat = () => {
 
   const messageGroups = groupMessagesByDate(messages);
 
-  // Функция для форматирования времени
   const formatTime = (dateString) => {
     return new Date(dateString).toLocaleTimeString('ru-RU', {
       hour: '2-digit',
@@ -242,7 +349,6 @@ const Chat = () => {
     });
   };
 
-  // Функция для форматирования даты
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     const today = new Date();
@@ -262,7 +368,6 @@ const Chat = () => {
     }
   };
 
-  // Получаем отображаемое имя для сообщения
   const getDisplayName = (message) => {
     if (isMyMessage(message)) {
       return currentUser?.role === 'admin' ? 'Вы (Админ)' : 'Вы';

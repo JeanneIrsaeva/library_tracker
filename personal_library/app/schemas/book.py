@@ -58,7 +58,7 @@ class BookUpdate(BaseModel):
 
 class BookResponse(BookBase):
     id: int
-    user_id: int  # Добавляем user_id в ответ
+    user_id: int  
     
     class Config:
         from_attributes = True
